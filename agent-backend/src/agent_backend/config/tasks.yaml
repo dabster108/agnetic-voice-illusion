@@ -1,0 +1,27 @@
+preprocess_user_input_task:
+  description: >
+    Process the raw user request below and return ONLY valid JSON.
+    Raw input: "{user_input}"
+
+    Required JSON schema:
+    {
+      "cleaned_input": "string",
+      "original_input": "string",
+      "language_detected": "string",
+      "input_source": "voice|text",
+      "noise_removed": ["string"],
+      "corrections_made": ["string"],
+      "ambiguities_flagged": ["string"],
+      "confidence_score": 0.0,
+      "is_multi_command": false,
+      "segmented_commands": ["string"]
+    }
+
+    Rules:
+    - Preserve intent.
+    - Remove filler words and obvious repetition.
+    - Fix grammar lightly.
+    - If ambiguous, add notes in ambiguities_flagged.
+  expected_output: >
+    A single valid JSON object matching the required schema.
+  agent: input_preprocessor_agent

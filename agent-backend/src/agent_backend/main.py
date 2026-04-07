@@ -1,94 +1,94 @@
 #!/usr/bin/env python
+import json
 import sys
-import warnings
-
-from datetime import datetime
 
 from agent_backend.crew import AgentBackend
 
-warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
-# This main file is intended to be a way for you to run your
-# crew locally, so refrain from adding unnecessary logic into this file.
-# Replace with inputs you want to test with, it will automatically
-# interpolate any tasks and agents information
+def _build_default_inputs() -> dict:
+	return {
+		"user_input": "um please make a flowchart for user login and password reset",
+		"input_source": "text",
+	}
+
+
+def _build_run_inputs_from_cli() -> dict:
+	inputs = _build_default_inputs()
+	if len(sys.argv) > 1:
+		cli_prompt = " ".join(sys.argv[1:]).strip()
+		if cli_prompt:
+			inputs["user_input"] = cli_prompt
+	return inputs
+
 
 def run():
-    """
-    Run the crew.
-    """
-    inputs = {
-        'topic': 'AI LLMs',
-        'current_year': str(datetime.now().year)
-    }
-
-    try:
-        AgentBackend().crew().kickoff(inputs=inputs)
-    except Exception as e:
-        raise Exception(f"An error occurred while running the crew: {e}")
+	"""Run Agent 1 only."""
+	inputs = _build_run_inputs_from_cli()
+	try:
+		return AgentBackend().crew().kickoff(inputs=inputs)
+	except Exception as e:
+		raise Exception(f"An error occurred while running Agent 1: {e}")
 
 
 def train():
-    """
-    Train the crew for a given number of iterations.
-    """
-    inputs = {
-        "topic": "AI LLMs",
-        'current_year': str(datetime.now().year)
-    }
-    try:
-        AgentBackend().crew().train(n_iterations=int(sys.argv[1]), filename=sys.argv[2], inputs=inputs)
+	"""Train the crew for a given number of iterations."""
+	inputs = _build_default_inputs()
+	try:
+		AgentBackend().crew().train(
+			n_iterations=int(sys.argv[1]),
+			filename=sys.argv[2],
+			inputs=inputs,
+		)
+	except Exception as e:
+		raise Exception(f"An error occurred while training the crew: {e}")
 
-    except Exception as e:
-        raise Exception(f"An error occurred while training the crew: {e}")
 
 def replay():
-    """
-    Replay the crew execution from a specific task.
-    """
-    try:
-        AgentBackend().crew().replay(task_id=sys.argv[1])
+	"""Replay the crew execution from a specific task."""
+	try:
+		AgentBackend().crew().replay(task_id=sys.argv[1])
+	except Exception as e:
+		raise Exception(f"An error occurred while replaying the crew: {e}")
 
-    except Exception as e:
-        raise Exception(f"An error occurred while replaying the crew: {e}")
 
 def test():
-    """
-    Test the crew execution and returns the results.
-    """
-    inputs = {
-        "topic": "AI LLMs",
-        "current_year": str(datetime.now().year)
-    }
+	"""Test the crew execution and return results."""
+	inputs = _build_default_inputs()
+	try:
+		AgentBackend().crew().test(
+			n_iterations=int(sys.argv[1]),
+			eval_llm=sys.argv[2],
+			inputs=inputs,
+		)
+	except Exception as e:
+		raise Exception(f"An error occurred while testing the crew: {e}")
 
-    try:
-        AgentBackend().crew().test(n_iterations=int(sys.argv[1]), eval_llm=sys.argv[2], inputs=inputs)
-
-    except Exception as e:
-        raise Exception(f"An error occurred while testing the crew: {e}")
 
 def run_with_trigger():
-    """
-    Run the crew with trigger payload.
-    """
-    import json
+	"""Run Agent 1 with trigger payload."""
+	if len(sys.argv) < 2:
+		raise Exception("No trigger payload provided. Please provide JSON payload as argument.")
 
-    if len(sys.argv) < 2:
-        raise Exception("No trigger payload provided. Please provide JSON payload as argument.")
+	try:
+		trigger_payload = json.loads(sys.argv[1])
+	except json.JSONDecodeError:
+		raise Exception("Invalid JSON payload provided as argument")
 
-    try:
-        trigger_payload = json.loads(sys.argv[1])
-    except json.JSONDecodeError:
-        raise Exception("Invalid JSON payload provided as argument")
+	trigger_text = (
+		trigger_payload.get("user_input")
+		or trigger_payload.get("prompt")
+		or trigger_payload.get("text")
+		or ""
+	)
 
-    inputs = {
-        "crewai_trigger_payload": trigger_payload,
-        "topic": "",
-        "current_year": ""
-    }
+	inputs = {
+		"crewai_trigger_payload": trigger_payload,
+		"user_input": trigger_text,
+		"input_source": trigger_payload.get("input_source", "text"),
+	}
 
-    try:
-        result = AgentBackend().crew().kickoff(inputs=inputs)
-        return result
-    except Exception as e:
-        raise Exception(f"An error occurred while running the crew with trigger: {e}")
+	try:
+		return AgentBackend().crew().kickoff(inputs=inputs)
+	except Exception as e:
+		raise Exception(f"An error occurred while running with trigger: {e}")
+
