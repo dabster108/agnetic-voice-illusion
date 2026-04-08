@@ -5,10 +5,13 @@ description = "agent-backend using crewAI"
 authors = [{ name = "Your Name", email = "you@example.com" }]
 requires-python = ">=3.10,<3.14"
 dependencies = [
+    "apscheduler>=3.11.2",
     "async>=0.6.2",
-    "crewai[tools]==1.9.3",
+    "crewai[google-genai,tools]==1.9.3",
     "fastapi>=0.135.3",
+    "litellm>=1.75.3",
     "pydantic>=2.11.10",
+    "python-dotenv>=1.1.1",
 ]
 
 [project.scripts]

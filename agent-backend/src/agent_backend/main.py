@@ -1,8 +1,92 @@
 #!/usr/bin/env python
 import json
+import os
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
 
 from agent_backend.crew import AgentBackend
+
+
+load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+AGENT_INPUT_PATH = PROJECT_ROOT / "agent_input.json"
+
+
+def _configure_litellm_runtime() -> None:
+	"""Reduce LiteLLM shutdown logging noise without changing model behavior."""
+	# Keep user-provided setting if present; otherwise avoid very verbose internal logs.
+	os.environ.setdefault("LITELLM_LOG", "ERROR")
+
+	try:
+		import litellm
+
+		litellm.suppress_debug_info = True
+		litellm.turn_off_message_logging = True
+		litellm.callbacks = []
+		litellm.success_callback = []
+		litellm.failure_callback = []
+		litellm.service_callback = []
+	except Exception:
+		# Never block crew execution if LiteLLM internals change.
+		pass
+
+
+_configure_litellm_runtime()
+
+
+def _build_agent_input_payload(inputs: dict[str, Any], entrypoint: str) -> dict[str, Any]:
+	"""Build a structured payload that can be handed to the next MCP agent."""
+	raw_text = str(inputs.get("user_input", "")).strip()
+	input_source = str(inputs.get("input_source", "text")).strip() or "text"
+
+	payload: dict[str, Any] = {
+		"input": {
+			"text": raw_text,
+			"source": input_source,
+		},
+		"elaborated": {
+			"intent_summary": (
+				f"User requested: {raw_text}" if raw_text else "No user_input provided."
+			),
+			"handoff_target": "next_agent_for_mcp",
+			"handoff_action": "Pass normalized JSON to the downstream agent that calls MCP.",
+			"expected_next_payload_fields": [
+				"cleaned_input",
+				"original_input",
+				"language_detected",
+				"input_source",
+				"noise_removed",
+				"corrections_made",
+				"ambiguities_flagged",
+				"confidence_score",
+				"is_multi_command",
+				"segmented_commands",
+			],
+		},
+		"meta": {
+			"entrypoint": entrypoint,
+			"saved_at_utc": datetime.now(timezone.utc).isoformat(),
+		},
+	}
+
+	if "crewai_trigger_payload" in inputs:
+		payload["trigger_payload"] = inputs["crewai_trigger_payload"]
+
+	return payload
+
+
+def _save_inputs_snapshot(inputs: dict[str, Any], entrypoint: str) -> None:
+	"""Save the latest run input payload for downstream handoff."""
+	payload = _build_agent_input_payload(inputs, entrypoint)
+	AGENT_INPUT_PATH.write_text(
+		json.dumps(payload, ensure_ascii=True, indent=2),
+		encoding="utf-8",
+	)
 
 
 def _build_default_inputs() -> dict:
@@ -24,6 +108,7 @@ def _build_run_inputs_from_cli() -> dict:
 def run():
 	"""Run Agent 1 only."""
 	inputs = _build_run_inputs_from_cli()
+	_save_inputs_snapshot(inputs, entrypoint="run_crew")
 	try:
 		return AgentBackend().crew().kickoff(inputs=inputs)
 	except Exception as e:
@@ -86,6 +171,7 @@ def run_with_trigger():
 		"user_input": trigger_text,
 		"input_source": trigger_payload.get("input_source", "text"),
 	}
+	_save_inputs_snapshot(inputs, entrypoint="run_with_trigger")
 
 	try:
 		return AgentBackend().crew().kickoff(inputs=inputs)
