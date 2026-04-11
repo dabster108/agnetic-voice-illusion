@@ -8,15 +8,19 @@ dependencies = [
     "apscheduler>=3.11.2",
     "async>=0.6.2",
     "crewai[google-genai,tools]==1.9.3",
+    "email-validator>=2.2.0",
     "fastapi>=0.135.3",
+    "fastapi-sso>=0.16.0",
     "litellm>=1.75.3",
     "pydantic>=2.11.10",
     "python-dotenv>=1.1.1",
+    "uvicorn>=0.35.0",
 ]
 
 [project.scripts]
 agent_backend = "agent_backend.main:run"
 run_crew = "agent_backend.main:run"
+serve_api = "agent_backend.main:serve_api"
 train = "agent_backend.main:train"
 replay = "agent_backend.main:replay"
 test = "agent_backend.main:test"
