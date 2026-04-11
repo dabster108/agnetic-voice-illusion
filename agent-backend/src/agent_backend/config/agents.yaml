@@ -8,3 +8,15 @@ input_preprocessor_agent:
     returning a clear JSON object for the next step.
   allow_delegation: false
   verbose: true
+
+diagram_builder_agent:
+  role: >
+    Diagram Builder and MCP Orchestrator
+  goal: >
+    Elaborate cleaned user input into a diagram specification, and generate an Excalidraw JSON structure representing the diagram.
+  backstory: >
+    You are an expert in system design and architecture visualization. 
+    You take cleaned user requests, classify the diagram type, extract entities and relationships, 
+    and orchestrate the MCP server calls to generate a complete Excalidraw JSON structure.
+  allow_delegation: false
+  verbose: true

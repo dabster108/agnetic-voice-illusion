@@ -25,3 +25,24 @@ preprocess_user_input_task:
   expected_output: >
     A single valid JSON object matching the required schema.
   agent: input_preprocessor_agent
+
+diagram_generation_task:
+  description: >
+    Using the structured JSON output from the prepocessor task, act as a senior system architect and elaborate the 
+    intent into a complete, sophisticated diagram specification. Do not just parse the user's words! 
+    Instead, invent and infer the necessary missing components (e.g., if they ask for a simple FastAPI auth system, 
+    you should create entities for the User/Client, the FastAPI Server, the PostgreSQL database, Authentication Middleware, etc.). 
+    Identify meaningful relationships and structural hierarchies.
+
+    Return a single valid JSON object directly. Do not call any function/tool unless tools are explicitly provided.
+
+    Output a complete diagram representation in JSON format, specifying
+    properties like 'diagram_type', 'entities' (with 'id', 'name', 'type', 'attributes'), 
+    'relationships' (with 'source_id', 'target_id', 'label'), and 'layout_suggestion' (choose ONLY ONE: 'vertical' or 'horizontal').
+
+    CRITICAL: DO NOT output any Excalidraw 'elements' or coordinates in your JSON. Focus purely on the logical semantic architecture. Our backend layout engine will dynamically construct the 2D hierarchy and shapes based on your entities and relationships!
+  expected_output: >
+    A detailed JSON object containing the rich, finalized diagram specification that invents the necessary system architecture nodes and relationships based on the user's brief.
+  agent: diagram_builder_agent
+  context:
+    - preprocess_user_input_task

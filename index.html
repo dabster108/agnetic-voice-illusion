@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Requirement to Excalidraw</title>
+    <link rel="stylesheet" href="https://unpkg.com/@excalidraw/excalidraw@0.18.0/dist/prod/index.css" />
+    <style>
+        :root {
+            --bg: #f7f5ef;
+            --panel: #ffffff;
+            --ink: #1f2937;
+            --muted: #6b7280;
+            --accent: #0f766e;
+            --accent-2: #f59e0b;
+            --line: #e5e7eb;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Avenir Next", "Segoe UI", sans-serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at 10% 0%, #dff7ef 0, transparent 42%),
+                radial-gradient(circle at 90% 100%, #fef3c7 0, transparent 35%),
+                var(--bg);
+        }
+
+        .wrap {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 16px;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+            overflow: hidden;
+        }
+
+        .top {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 12px;
+            padding: 14px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 84px;
+            resize: vertical;
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            padding: 12px;
+            font: inherit;
+            color: var(--ink);
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            align-items: end;
+        }
+
+        button {
+            border: 0;
+            border-radius: 12px;
+            padding: 10px 14px;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .btn-main {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn-sub {
+            background: #eef2ff;
+            color: #3730a3;
+        }
+
+        .status {
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .stage {
+            height: calc(100vh - 260px);
+            min-height: 420px;
+        }
+
+        .pill {
+            display: inline-block;
+            margin-left: 8px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: #fffbeb;
+            color: #92400e;
+            font-size: 12px;
+        }
+
+        @media (max-width: 900px) {
+            .top {
+                grid-template-columns: 1fr;
+            }
+
+            .actions {
+                justify-content: flex-start;
+            }
+
+            .stage {
+                height: calc(100vh - 320px);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="error-log" style="color: red; padding: 20px; font-family: monospace; white-space: pre-wrap;"></div>
+    <div id="app"></div>
+
+    <script type="module">
+        window.addEventListener('error', (e) => {
+            document.getElementById('error-log').textContent += e.message + '\n' + (e.error?.stack || '') + '\n';
+        });
+
+        import React, { useMemo, useState } from "https://esm.sh/react@18.3.1";
+        import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
+        import { Excalidraw } from "https://esm.sh/@excalidraw/excalidraw@0.18.0?deps=react@18.3.1,react-dom@18.3.1";
+
+        const MCP_URL = "http://localhost:3001/mcp";
+        const API_URL = "http://localhost:8000/generate";
+
+        function uid(prefix = "el") {
+            if (crypto && crypto.randomUUID) {
+                return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 10)}`;
+            }
+            return `${prefix}_${Math.random().toString(36).slice(2, 12)}`;
+        }
+
+        function postJsonRpc(payload) {
+            return fetch(MCP_URL, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json, text/event-stream",
+                },
+                body: JSON.stringify(payload),
+            }).then(async (res) => {
+                const raw = await res.text();
+                const contentType = res.headers.get("content-type") || "";
+
+                if (!res.ok) {
+                    throw new Error(raw || `HTTP ${res.status}`);
+                }
+
+                if (contentType.includes("text/event-stream")) {
+                    const lines = raw.split("\n");
+                    let lastData = "";
+                    for (const line of lines) {
+                        if (line.startsWith("data:")) {
+                            lastData = line.slice(5).trim();
+                        }
+                    }
+                    if (!lastData) return null;
+                    return JSON.parse(lastData);
+                }
+
+                if (!raw.trim()) return null;
+                return JSON.parse(raw);
+            });
+        }
+
+        async function requestBackendDiagram(requirement) {
+            const res = await fetch(API_URL, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                },
+                body: JSON.stringify({ requirement, input_source: "text" }),
+            });
+
+            const raw = await res.text();
+            if (!res.ok) {
+                throw new Error(raw || `Backend HTTP ${res.status}`);
+            }
+            return raw.trim() ? JSON.parse(raw) : {};
+        }
+
+        function buildElementsFromPrompt(prompt) {
+            const text = (prompt || "").trim();
+            const parts = text.includes("->")
+                ? text
+                    .split("->")
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                : text
+                    .split(/[.\n]/)
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                    .slice(0, 5);
+
+            const labels = parts.length > 0 ? parts : ["Requirement", text || "No input provided"];
+
+            const elements = [
+                { type: "cameraUpdate", width: 800, height: 600, x: 0, y: 0 },
+            ];
+
+            const startX = 80;
+            const y = 220;
+            const boxW = 200;
+            const boxH = 90;
+            const gap = 80;
+
+            for (let i = 0; i < labels.length; i += 1) {
+                const x = startX + i * (boxW + gap);
+                const id = uid("box");
+                elements.push({
+                    type: "rectangle",
+                    id,
+                    x,
+                    y,
+                    width: boxW,
+                    height: boxH,
+                    roundness: { type: 3 },
+                    strokeColor: "#1f2937",
+                    backgroundColor: i % 2 === 0 ? "#c3fae8" : "#dbeafe",
+                    fillStyle: "solid",
+                    boundElements: [{ type: "text", id: id + "_txt" }]
+                });
+                elements.push({
+                    type: "text",
+                    id: id + "_txt",
+                    containerId: id,
+                    x: x + 14,
+                    y: y + 34,
+                    width: boxW - 28,
+                    height: boxH - 24,
+                    text: Array.isArray(labels) && labels[i] ? labels[i].slice(0, 80) : "Requirement",
+                    fontSize: 22,
+                    fontFamily: 1,
+                    textAlign: "center",
+                    verticalAlign: "middle",
+                    strokeColor: "#0f172a",
+                });
+
+                if (i > 0) {
+                    elements.push({
+                        type: "arrow",
+                        id: uid("ar"),
+                        x: x - gap,
+                        y: y + boxH / 2,
+                        width: gap,
+                        height: 0,
+                        points: [
+                            [0, 0],
+                            [gap, 0],
+                        ],
+                        strokeColor: "#0f766e",
+                        strokeWidth: 2,
+                        endArrowhead: "arrow",
+                    });
+                }
+            }
+
+            if (labels.length === 1) {
+                elements.push({
+                    type: "text",
+                    id: uid("title"),
+                    x: 90,
+                    y: 140,
+                    text: "Requirement Diagram",
+                    fontSize: 30,
+                    fontFamily: 1,
+                    textAlign: "center",
+                    strokeColor: "#0f172a",
+                });
+            }
+
+            return elements;
+        }
+
+        function normalizeLabel(v) {
+            const text = String(v || "").trim();
+            if (!text) return "";
+            if (["-", "_", "na", "n/a", "none", "null", "undefined"].includes(text.toLowerCase())) {
+                return "";
+            }
+            return text.slice(0, 80);
+        }
+
+        function getEntityLabel(entity, i) {
+            if (!entity || typeof entity !== "object") return `Component ${i + 1}`;
+            return normalizeLabel(entity.name)
+                || normalizeLabel(entity?.attributes?.label)
+                || normalizeLabel(entity.type)
+                || `Component ${i + 1}`;
+        }
+
+        function buildElementsFromEntities(entities, relationships) {
+            if (!Array.isArray(entities) || entities.length === 0) return [];
+
+            const elements = [{ type: "cameraUpdate", width: 1200, height: 700, x: 0, y: 0 }];
+            const boxW = 240;
+            const boxH = 110;
+            const gap = 120;
+            const y = 240;
+            const startX = 120;
+            const idToAnchor = {};
+
+            for (let i = 0; i < entities.length; i += 1) {
+                const e = entities[i];
+                const x = startX + i * (boxW + gap);
+                const id = String(e?.id || `entity_${i + 1}`);
+                const label = getEntityLabel(e, i);
+
+                elements.push({
+                    type: "rectangle",
+                    id: `box_${i + 1}`,
+                    x,
+                    y,
+                    width: boxW,
+                    height: boxH,
+                    roundness: { type: 3 },
+                    strokeColor: "#1f2937",
+                    backgroundColor: i % 2 === 0 ? "#c3fae8" : "#dbeafe",
+                    text: label,
+                    textAlign: "center",
+                    verticalAlign: "middle",
+                    fillStyle: "solid",
+                    boundElements: [{ type: "text", id: `label_${i + 1}` }]
+                });
+
+                elements.push({
+                    type: "text",
+                    id: `label_${i + 1}`,
+                    containerId: `box_${i + 1}`,
+                    x: x + 14,
+                    y: y + boxH / 2 - 12,
+                    width: boxW - 28,
+                    height: boxH - 24,
+                    text: label,
+                    fontSize: 20,
+                    fontFamily: 1,
+                    textAlign: "center",
+                    verticalAlign: "middle",
+                    strokeColor: "#0f172a",
+                });
+
+                idToAnchor[id] = { x: x + boxW, y: y + boxH / 2 };
+            }
+
+            if (Array.isArray(relationships) && relationships.length > 0) {
+                for (let i = 0; i < relationships.length; i += 1) {
+                    const rel = relationships[i] || {};
+                    const source = idToAnchor[String(rel.source_id || "")];
+                    const target = idToAnchor[String(rel.target_id || "")];
+                    if (!source || !target) continue;
+
+                    const dx = target.x - source.x;
+                    const dy = target.y - source.y;
+
+                    elements.push({
+                        type: "arrow",
+                        id: `arrow_${i + 1}`,
+                        x: source.x,
+                        y: source.y,
+                        width: Math.abs(dx),
+                        height: Math.abs(dy),
+                        points: [[0, 0], [dx, dy]],
+                        strokeColor: "#0f766e",
+                        strokeWidth: 2,
+                        endArrowhead: "arrow",
+                    });
+
+                    const relLabel = normalizeLabel(rel.label);
+                    if (relLabel) {
+                        elements.push({
+                            type: "text",
+                            id: `arrow_label_${i + 1}`,
+                            x: source.x + dx / 2,
+                            y: source.y + dy / 2 - 20,
+                            text: relLabel,
+                            fontSize: 18,
+                            fontFamily: 1,
+                            textAlign: "center",
+                            strokeColor: "#0f172a",
+                        });
+                    }
+                }
+            }
+
+            return elements;
+        }
+
+        function normalizeBackendElements(result, requirement) {
+            const backendElements = Array.isArray(result?.elements) ? result.elements : [];
+            const entities = Array.isArray(result?.entities) ? result.entities : [];
+
+            if (backendElements.length === 0) {
+                const byEntities = buildElementsFromEntities(entities, result?.relationships || []);
+                return byEntities.length > 0 ? byEntities : buildElementsFromPrompt(requirement);
+            }
+
+            const normalized = [];
+            let rectCount = 0;
+            let labelIdx = 0;
+
+            for (let i = 0; i < backendElements.length; i += 1) {
+                const el = backendElements[i];
+                if (!el || typeof el !== "object") continue;
+                normalized.push(el);
+
+                if (el.type !== "rectangle") continue;
+
+                rectCount += 1;
+                let label = normalizeLabel(el.text);
+                if (!label && labelIdx < entities.length) {
+                    label = getEntityLabel(entities[labelIdx], labelIdx);
+                    labelIdx += 1;
+                }
+                if (!label) label = `Component ${rectCount}`;
+
+                el.text = label;
+                el.textAlign = "center";
+                el.verticalAlign = "middle";
+
+                const hasCoords = typeof el.x === "number" && typeof el.y === "number";
+                const h = typeof el.height === "number" ? el.height : 100;
+                if (hasCoords) {
+                    if (!el.id) el.id = `rect_${rectCount}`;
+                    
+                    const hasBoundText = (el.boundElements || []).some(b => b.type === "text");
+                    if (!hasBoundText) {
+                        el.boundElements = (el.boundElements || []).concat([{ type: "text", id: `overlay_${rectCount}` }]);
+                        normalized.push({
+                            type: "text",
+                            id: `overlay_${rectCount}`,
+                            containerId: el.id,
+                            x: el.x + 14,
+                            y: el.y + h / 2 - 12,
+                            width: el.width ? el.width - 28 : 200,
+                            height: h - 24,
+                            text: label,
+                            fontSize: 20,
+                            fontFamily: 1,
+                            textAlign: "center",
+                            verticalAlign: "middle",
+                            strokeColor: "#0f172a",
+                        });
+                    }
+                }
+            }
+
+            if (entities.length > 0 && rectCount < entities.length) {
+                const byEntities = buildElementsFromEntities(entities, result?.relationships || []);
+                if (byEntities.length > 0) return byEntities;
+            }
+
+            return normalized;
+        }
+
+        function makeExcalidrawRenderable(elements) {
+            if (!Array.isArray(elements)) return [];
+            return elements
+                .filter(el => el && el.type && el.type !== "cameraUpdate")
+                .map(el => {
+                    if (el.type !== "text") return el;
+                    return {
+                        ...el,
+                        width: typeof el.width === "number" ? el.width : Math.max(100, String(el.text || "").length * 10),
+                        height: typeof el.height === "number" ? el.height : 30,
+                    };
+                });
+        }
+
+        function App() {
+            const [prompt, setPrompt] = useState("Create a flowchart: User -> Login -> Dashboard");
+            const [elements, setElements] = useState(() => makeExcalidrawRenderable(buildElementsFromPrompt("Create a flowchart: User -> Login -> Dashboard")));
+            const [sceneKey, setSceneKey] = useState(0);
+            const [status, setStatus] = useState("Ready");
+            const [checkpoint, setCheckpoint] = useState("");
+            const [busy, setBusy] = useState(false);
+
+            const initialData = useMemo(() => ({
+                elements,
+                appState: { viewBackgroundColor: "#fcfcfc" },
+            }), [elements]);
+
+            async function initializeMcp() {
+                return postJsonRpc({
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "initialize",
+                    params: {
+                        protocolVersion: "2024-11-05",
+                        capabilities: {},
+                        clientInfo: { name: "index-html-client", version: "0.1.0" },
+                    },
+                });
+            }
+
+            async function generate() {
+                setBusy(true);
+                setStatus("Sending requirement to FastAPI...");
+                setCheckpoint("");
+                try {
+                    const api = await requestBackendDiagram(prompt);
+                    const next = normalizeBackendElements(api?.result || {}, prompt);
+                    setElements(makeExcalidrawRenderable(next));
+                    setSceneKey((v) => v + 1);
+
+                    const backendCheckpoint = api?.result?.checkpoint_id || api?.mcp_checkpoint_id || "";
+                    if (backendCheckpoint) {
+                        setCheckpoint(backendCheckpoint);
+                        setStatus("Done. Requirement processed via FastAPI + CrewAI, diagram synced to MCP.");
+                        return;
+                    }
+
+                    setStatus("Connecting to MCP...");
+                    await initializeMcp();
+
+                    setStatus("Sending create_view to MCP...");
+                    const rpc = await postJsonRpc({
+                        jsonrpc: "2.0",
+                        id: 2,
+                        method: "tools/call",
+                        params: {
+                            name: "create_view",
+                            arguments: {
+                                elements: JSON.stringify(next),
+                            },
+                        },
+                    });
+
+                    const out = rpc?.result?.structuredContent?.checkpointId || "";
+                    if (out) {
+                        setCheckpoint(out);
+                    }
+                    setStatus("Done. Requirement processed via FastAPI + CrewAI, diagram synced to MCP.");
+                } catch (err) {
+                    setStatus(`Error: ${err.message || String(err)}`);
+                } finally {
+                    setBusy(false);
+                }
+            }
+
+            function clearBoard() {
+                setElements([]);
+                setSceneKey((v) => v + 1);
+                setCheckpoint("");
+                setStatus("Cleared");
+            }
+
+            return React.createElement(
+                "div",
+                { className: "wrap" },
+                React.createElement(
+                    "div",
+                    { className: "panel" },
+                    React.createElement(
+                        "div",
+                        { className: "top" },
+                        React.createElement("textarea", {
+                            value: prompt,
+                            placeholder: "Write requirement here. Example: User -> Login -> Dashboard -> Settings",
+                            onChange: (e) => setPrompt(e.target.value),
+                        }),
+                        React.createElement(
+                            "div",
+                            { className: "actions" },
+                            React.createElement(
+                                "button",
+                                { className: "btn-main", disabled: busy, onClick: generate },
+                                busy ? "Generating..." : "Generate Diagram"
+                            ),
+                            React.createElement(
+                                "button",
+                                { className: "btn-sub", disabled: busy, onClick: clearBoard },
+                                "Clear"
+                            )
+                        )
+                    ),
+                    React.createElement(
+                        "div",
+                        { className: "status" },
+                        status,
+                        checkpoint
+                            ? React.createElement("span", { className: "pill" }, `checkpoint: ${checkpoint}`)
+                            : null
+                    ),
+                    React.createElement(
+                        "div",
+                        { className: "stage" },
+                        React.createElement(Excalidraw, { key: sceneKey, initialData })
+                    )
+                )
+            );
+        }
+
+        createRoot(document.getElementById("app")).render(React.createElement(App));
+    </script>
+</body>
+
+</html>
