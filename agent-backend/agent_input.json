@@ -1,0 +1,27 @@
+{
+  "input": {
+    "text": "um please make a flowchart for user login and password reset",
+    "source": "text"
+  },
+  "elaborated": {
+    "intent_summary": "User requested: um please make a flowchart for user login and password reset",
+    "handoff_target": "next_agent_for_mcp",
+    "handoff_action": "Pass normalized JSON to the downstream agent that calls MCP.",
+    "expected_next_payload_fields": [
+      "cleaned_input",
+      "original_input",
+      "language_detected",
+      "input_source",
+      "noise_removed",
+      "corrections_made",
+      "ambiguities_flagged",
+      "confidence_score",
+      "is_multi_command",
+      "segmented_commands"
+    ]
+  },
+  "meta": {
+    "entrypoint": "run_crew",
+    "saved_at_utc": "2026-04-11T08:37:08.901463+00:00"
+  }
+}

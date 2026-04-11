@@ -21,10 +21,18 @@ def _configure_litellm_runtime() -> None:
 	"""Reduce LiteLLM shutdown logging noise without changing model behavior."""
 	# Keep user-provided setting if present; otherwise avoid very verbose internal logs.
 	os.environ.setdefault("LITELLM_LOG", "ERROR")
+	os.environ.setdefault("LITELLM_TELEMETRY", "False")
+
+	try:
+		# Pre-import apscheduler so its atexit registration happens before python shutdown phase.
+		import apscheduler.schedulers.asyncio  # noqa
+	except ImportError:
+		pass
 
 	try:
 		import litellm
 
+		litellm.telemetry = False
 		litellm.suppress_debug_info = True
 		litellm.turn_off_message_logging = True
 		litellm.callbacks = []

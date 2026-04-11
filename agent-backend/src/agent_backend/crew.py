@@ -7,19 +7,19 @@ from crewai.project import CrewBase, agent, crew, task
 
 
 def _resolve_model_name() -> str:
-	"""Resolve model name from env with a safe default for LiteLLM + Mistral."""
+	"""Resolve model name from env with a safe default for LiteLLM + Groq."""
 	return (
 		os.getenv("MODEL", "").strip()
 		or os.getenv("LITELLM_MODEL", "").strip()
-		or "mistral/mistral-small-latest"
+		or "groq/llama-3.1-8b-instant"
 	)
 
 
 def _validate_provider_credentials(model_name: str) -> None:
 	"""Fail fast with actionable messages when provider keys are missing."""
-	if model_name.startswith("mistral/") and not os.getenv("MISTRAL_API_KEY", "").strip():
+	if model_name.startswith("groq/") and not os.getenv("GROQ_API_KEY", "").strip():
 		raise ValueError(
-			"MISTRAL_API_KEY is required for mistral/* models. "
+			"GROQ_API_KEY is required for groq/* models. "
 			"Set it in .env before running the crew."
 		)
 
