@@ -67,6 +67,11 @@ class GenerateRequest(BaseModel):
 	input_source: str = Field(default="text")
 
 
+class WorkspaceGenerateRequest(BaseModel):
+	prompt: str = Field(..., min_length=1, description="Prompt to convert into workspace graph")
+	input_source: str = Field(default="text")
+
+
 _RENDERABLE_EXCALIDRAW_TYPES = {
 	"cameraUpdate",
 	"rectangle",
@@ -573,6 +578,319 @@ def _ensure_renderable_result(result_payload: dict[str, Any], requirement: str) 
 	return result_payload
 
 
+def _as_float(value: Any, default: float) -> float:
+	if _is_number(value):
+		return float(value)
+	return default
+
+
+def _normalize_node_color(value: Any) -> str:
+	color = str(value or "").strip()
+	if not color:
+		return "rgba(56, 189, 248, 0.25)"
+	if color.startswith("#") or color.startswith("rgb"):
+		return color
+	return "rgba(56, 189, 248, 0.25)"
+
+
+def _extract_workspace_graph(
+	result_payload: dict[str, Any],
+	requirement: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+	elements = result_payload.get("elements")
+	relationships = result_payload.get("relationships")
+	entities = result_payload.get("entities")
+
+	text_by_container: dict[str, str] = {}
+	if isinstance(elements, list):
+		for element in elements:
+			if not isinstance(element, dict) or element.get("type") != "text":
+				continue
+			container_id = str(element.get("containerId") or "").strip()
+			text_value = _normalize_label(element.get("text"))
+			if container_id and text_value:
+				text_by_container[container_id] = text_value
+
+	entity_map: dict[str, dict[str, Any]] = {}
+	if isinstance(entities, list):
+		for idx, entity in enumerate(entities, start=1):
+			if not isinstance(entity, dict):
+				continue
+			entity_id = str(entity.get("id") or f"entity_{idx}").strip()
+			if entity_id:
+				entity_map[entity_id] = entity
+
+	nodes: list[dict[str, Any]] = []
+	id_lookup: dict[str, str] = {}
+	seen_node_ids: set[str] = set()
+
+	def register_node(
+		raw_id: str,
+		title: str,
+		description: str,
+		x: float,
+		y: float,
+		width: float,
+		height: float,
+		color: str,
+	) -> None:
+		base_id = raw_id.strip() or f"node_{len(nodes) + 1}"
+		normalized_id = base_id[4:] if base_id.startswith("box_") else base_id
+		candidate = normalized_id or f"node_{len(nodes) + 1}"
+		if candidate in seen_node_ids:
+			candidate = f"{candidate}_{len(nodes) + 1}"
+
+		seen_node_ids.add(candidate)
+		id_lookup[base_id] = candidate
+		id_lookup[normalized_id] = candidate
+		id_lookup[f"box_{normalized_id}"] = candidate
+
+		nodes.append(
+			{
+				"id": candidate,
+				"title": title,
+				"description": description,
+				"x": x,
+				"y": y,
+				"width": width,
+				"height": height,
+				"color": color,
+			}
+		)
+
+	if isinstance(elements, list):
+		for idx, element in enumerate(elements, start=1):
+			if not isinstance(element, dict):
+				continue
+
+			shape_type = element.get("type")
+			if shape_type not in {"rectangle", "ellipse", "diamond"}:
+				continue
+
+			raw_id = str(element.get("id") or f"node_{idx}")
+			normalized_id = raw_id[4:] if raw_id.startswith("box_") else raw_id
+			entity_ref = entity_map.get(raw_id) or entity_map.get(normalized_id)
+
+			title = (
+				_normalize_label(element.get("text"))
+				or _normalize_label(text_by_container.get(raw_id))
+				or _normalize_label(text_by_container.get(normalized_id))
+				or _normalize_label(entity_ref.get("name") if entity_ref else "")
+				or _normalize_label(entity_ref.get("type") if entity_ref else "")
+				or f"Component {len(nodes) + 1}"
+			)
+
+			entity_type = _normalize_label(entity_ref.get("type") if entity_ref else "")
+			description = (
+				f"{entity_type} component" if entity_type else "AI-generated architecture component."
+			)
+
+			register_node(
+				raw_id=raw_id,
+				title=title,
+				description=description,
+				x=_as_float(element.get("x"), 260 + ((idx - 1) % 4) * 280),
+				y=_as_float(element.get("y"), 220 + ((idx - 1) // 4) * 180),
+				width=_as_float(element.get("width"), 240),
+				height=_as_float(element.get("height"), 108),
+				color=_normalize_node_color(element.get("backgroundColor")),
+			)
+
+	if not nodes and isinstance(entities, list):
+		for idx, entity in enumerate(entities, start=1):
+			if not isinstance(entity, dict):
+				continue
+
+			entity_id = str(entity.get("id") or f"entity_{idx}")
+			title = _normalize_label(entity.get("name")) or _normalize_label(entity.get("type")) or f"Component {idx}"
+			entity_type = _normalize_label(entity.get("type"))
+			description = f"{entity_type} component" if entity_type else "AI-generated architecture component."
+
+			register_node(
+				raw_id=entity_id,
+				title=title,
+				description=description,
+				x=260 + ((idx - 1) % 4) * 280,
+				y=220 + ((idx - 1) // 4) * 180,
+				width=240,
+				height=108,
+				color="rgba(56, 189, 248, 0.25)",
+			)
+
+	if not nodes:
+		fallback_labels = _labels_from_requirement(requirement)
+		for idx, label in enumerate(fallback_labels[:8], start=1):
+			register_node(
+				raw_id=f"fallback_{idx}",
+				title=label,
+				description="Fallback component derived from prompt.",
+				x=260 + ((idx - 1) % 4) * 280,
+				y=220 + ((idx - 1) // 4) * 180,
+				width=240,
+				height=108,
+				color="rgba(56, 189, 248, 0.25)",
+			)
+
+	edges: list[dict[str, Any]] = []
+	seen_edges: set[str] = set()
+
+	def add_edge(source: str, target: str, label: str = "") -> None:
+		if not source or not target or source == target:
+			return
+		if source not in seen_node_ids or target not in seen_node_ids:
+			return
+
+		normalized_label = _normalize_label(label)
+		edge_key = f"{source}->{target}:{normalized_label.lower()}"
+		if edge_key in seen_edges:
+			return
+
+		seen_edges.add(edge_key)
+		edges.append(
+			{
+				"id": f"edge_{len(edges) + 1}",
+				"from": source,
+				"to": target,
+				"label": normalized_label,
+			}
+		)
+
+	def resolve_node_id(raw_id: str) -> str:
+		value = raw_id.strip()
+		if not value:
+			return ""
+		if value in id_lookup:
+			return id_lookup[value]
+		if value.startswith("box_"):
+			return id_lookup.get(value[4:], "")
+		return id_lookup.get(f"box_{value}", "")
+
+	if isinstance(relationships, list):
+		for relation in relationships:
+			if not isinstance(relation, dict):
+				continue
+
+			source_raw = str(relation.get("source_id") or "").strip()
+			target_raw = str(relation.get("target_id") or "").strip()
+			source = resolve_node_id(source_raw)
+			target = resolve_node_id(target_raw)
+
+			add_edge(source, target, str(relation.get("label") or ""))
+
+	if not edges and isinstance(elements, list):
+		for element in elements:
+			if not isinstance(element, dict) or element.get("type") != "arrow":
+				continue
+
+			start_binding = element.get("startBinding")
+			end_binding = element.get("endBinding")
+			if not isinstance(start_binding, dict) or not isinstance(end_binding, dict):
+				continue
+
+			source_raw = str(start_binding.get("elementId") or "").strip()
+			target_raw = str(end_binding.get("elementId") or "").strip()
+			source = resolve_node_id(source_raw)
+			target = resolve_node_id(target_raw)
+
+			arrow_id = str(element.get("id") or "")
+			label = _normalize_label(text_by_container.get(arrow_id))
+			add_edge(source, target, label)
+
+	if not edges and len(nodes) > 1:
+		for idx in range(1, len(nodes)):
+			add_edge(nodes[idx - 1]["id"], nodes[idx]["id"], "flow")
+
+	return nodes, edges
+
+
+def _build_workspace_steps(
+	requirement: str,
+	nodes: list[dict[str, Any]],
+	edges: list[dict[str, Any]],
+	base_response: dict[str, Any],
+	result_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+	timestamp = datetime.now(timezone.utc).isoformat()
+	prompt_preview = requirement.strip().replace("\n", " ")[:90]
+
+	steps: list[dict[str, Any]] = [
+		{
+			"id": "backend-received",
+			"title": "Prompt accepted",
+			"message": f"Queued prompt: {prompt_preview}",
+			"status": "completed",
+			"timestamp": timestamp,
+		},
+		{
+			"id": "backend-plan",
+			"title": "Generating architecture",
+			"message": "Crew agents analyzed the requirement and drafted system structure.",
+			"status": "completed",
+			"timestamp": timestamp,
+		},
+		{
+			"id": "backend-nodes",
+			"title": "Creating nodes",
+			"message": f"Produced {len(nodes)} architecture node(s) for the canvas.",
+			"status": "completed",
+			"timestamp": timestamp,
+		},
+		{
+			"id": "backend-edges",
+			"title": "Connecting elements",
+			"message": f"Generated {len(edges)} connection edge(s).",
+			"status": "completed",
+			"timestamp": timestamp,
+		},
+	]
+
+	if base_response.get("fallback"):
+		steps.append(
+			{
+				"id": "backend-fallback",
+				"title": "Fallback applied",
+				"message": "Primary generation failed, deterministic fallback graph used.",
+				"status": "completed",
+				"timestamp": timestamp,
+			}
+		)
+
+	if base_response.get("mcp_synced"):
+		steps.append(
+			{
+				"id": "backend-sync",
+				"title": "Canvas sync",
+				"message": "Diagram synced to MCP drawing service.",
+				"status": "completed",
+				"timestamp": timestamp,
+			}
+		)
+	else:
+		steps.append(
+			{
+				"id": "backend-sync",
+				"title": "Canvas sync",
+				"message": "MCP sync unavailable; returning local graph payload.",
+				"status": "running",
+				"timestamp": timestamp,
+			}
+		)
+
+	warning = str(result_payload.get("warning") or "").strip()
+	if warning:
+		steps.append(
+			{
+				"id": "backend-warning",
+				"title": "Generation warning",
+				"message": warning,
+				"status": "error",
+				"timestamp": timestamp,
+			}
+		)
+
+	return steps
+
+
 def _sync_elements_to_mcp(elements: Any) -> dict[str, Any]:
 	"""Push elements to Excalidraw MCP and return sync metadata."""
 	if not isinstance(elements, list) or not elements:
@@ -681,6 +999,41 @@ def generate(payload: GenerateRequest) -> dict[str, Any]:
 		"result": renderable,
 		"mcp_synced": sync_meta["mcp_synced"],
 		"mcp_checkpoint_id": sync_meta["mcp_checkpoint_id"],
+	}
+
+
+@app.post("/workspace/generate")
+def generate_workspace(payload: WorkspaceGenerateRequest) -> dict[str, Any]:
+	prompt = payload.prompt.strip()
+	if not prompt:
+		raise HTTPException(status_code=400, detail="prompt is required")
+
+	base_response = generate(
+		GenerateRequest(
+			requirement=prompt,
+			input_source=payload.input_source or "text",
+		)
+	)
+
+	result_payload = base_response.get("result")
+	if not isinstance(result_payload, dict):
+		raise HTTPException(status_code=500, detail="invalid generation payload")
+
+	nodes, edges = _extract_workspace_graph(result_payload, prompt)
+	steps = _build_workspace_steps(prompt, nodes, edges, base_response, result_payload)
+
+	return {
+		"ok": True,
+		"prompt": prompt,
+		"nodes": nodes,
+		"edges": edges,
+		"execution_steps": steps,
+		"meta": {
+			"fallback": bool(base_response.get("fallback")),
+			"mcp_synced": bool(base_response.get("mcp_synced")),
+			"checkpoint_id": str(base_response.get("mcp_checkpoint_id") or ""),
+			"warning": str(result_payload.get("warning") or ""),
+		},
 	}
 
 
