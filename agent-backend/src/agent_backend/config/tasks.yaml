@@ -14,7 +14,26 @@ preprocess_user_input_task:
       "ambiguities_flagged": ["string"],
       "confidence_score": 0.0,
       "is_multi_command": false,
-      "segmented_commands": ["string"]
+      "segmented_commands": ["string"],
+      "intent_summary": "string",
+      "primary_goal": "string",
+      "domain": "string",
+      "required_components": [
+        {
+          "name": "string",
+          "kind": "input|process|storage|output|decision|tool|integration",
+          "reason": "string",
+          "explicit": true
+        }
+      ],
+      "required_flows": [
+        {
+          "from": "string",
+          "to": "string",
+          "action": "string"
+        }
+      ],
+      "step_sequence": ["string"]
     }
 
     Rules:
@@ -22,27 +41,93 @@ preprocess_user_input_task:
     - Remove filler words and obvious repetition.
     - Fix grammar lightly.
     - If ambiguous, add notes in ambiguities_flagged.
+    - ALWAYS elaborate into required_components, even when user input is short.
+    - For apps that span client + server (e.g. React + Django/FastAPI), include BOTH sides plus data, auth, and tooling — not only three generic boxes.
+    - Include concrete tooling where relevant: e.g. JWT or session middleware, ORM/migrations, env secrets, HTTPS, CORS, password hashing (bcrypt/argon2), optional OAuth/social login, Redis for sessions if scale matters.
+    - Use kind "decision" for validation / branching steps (e.g. credentials valid?).
+    - Use kind "tool" for third-party libraries, OAuth providers, or dev packages that matter to the architecture.
+    - Use kind "storage" for databases, caches, file stores.
+    - Aim for at least 6–10 components on full-stack or auth-heavy requests unless the user explicitly wants something tiny.
+    - Never force unrelated defaults (no random unrelated microservices).
+    - Ensure required_flows and step_sequence describe a clear forward flow.
+
+    Example expansion for "build me a react authentication system with django as backend":
+    - required_components should include at least:
+      React SPA or React Frontend (kind input),
+      HTTPS / Browser (optional input),
+      Django REST or Django API layer (kind process),
+      Authentication Views or DRF Auth (kind process),
+      Credentials Valid? or Session Issued? (kind decision, diamond in diagram),
+      User model / Postgres or DB (kind storage),
+      JWT or Django Sessions (kind process or tool),
+      Tools: djangorestframework-simplejwt or django.contrib.auth (kind tool),
+      Optional: Redis session store (kind storage)
+    - required_flows should chain UI → API → auth → decision → DB → token/session back.
+
   expected_output: >
-    A single valid JSON object matching the required schema.
+    A single valid JSON object matching the required schema with expanded components and flow hints.
   agent: input_preprocessor_agent
 
 diagram_generation_task:
   description: >
-    Using the structured JSON output from the prepocessor task, act as a senior system architect and elaborate the 
-    intent into a complete, sophisticated diagram specification. Do not just parse the user's words! 
-    Instead, invent and infer the necessary missing components (e.g., if they ask for a simple FastAPI auth system, 
-    you should create entities for the User/Client, the FastAPI Server, the PostgreSQL database, Authentication Middleware, etc.). 
-    Identify meaningful relationships and structural hierarchies.
+    Using the structured JSON output from the preprocessor task, generate a domain-agnostic diagram graph.
+
+    Mandatory stage-by-stage process:
+    1) Validate expansion from Agent 1:
+      - Use required_components as primary node source (every important component becomes a node).
+      - Use required_flows and step_sequence as primary edge source.
+      - If expansion is sparse, infer only missing essentials needed to complete the requested flow.
+    2) Build stepwise flow graph:
+      - One component = one node.
+      - One meaningful interaction = one edge.
+      - Assign each node a "kind" and "shape" for visualization (see below).
+      - For full-stack or authentication diagrams, target at least 6 nodes when the preprocessor listed that many; do not collapse into only 3–4 boxes unless the user asked for minimal.
+    3) Finalize output:
+      - Deduplicate nodes and edges.
+      - Keep titles concise and human-readable.
+      - Use multiple shapes: rectangles for services/processes, ellipse for user/client/UI entry, diamond for decisions/validation gates, extra rectangles for tools/libraries.
+
+    Shape and kind rules (must follow on every node):
+    - "shape": "ellipse" for user-facing clients, browsers, React/Vue/SPA frontends (kind usually "input").
+    - "shape": "diamond" for decisions: validation, authorization checks, branching (kind "decision").
+    - "shape": "rectangle" for APIs, backends, services, tools, databases (use kind "storage" for DB/cache, "tool" for libraries/SDKs).
+
+    Rules:
+    - Expand intelligently; include tools and storage the user would realistically need.
+    - Include backend and persistence when the user names a framework (Django, FastAPI, etc.).
+    - Keep labels clean and concise.
+    - Avoid duplicate nodes and duplicate edges.
+    - Prefer forward flow direction.
+    - For authentication requests, show login path, validation decision, session/token issuance, and persistence.
 
     Return a single valid JSON object directly. Do not call any function/tool unless tools are explicitly provided.
 
-    Output a complete diagram representation in JSON format, specifying
-    properties like 'diagram_type', 'entities' (with 'id', 'name', 'type', 'attributes'), 
-    'relationships' (with 'source_id', 'target_id', 'label'), and 'layout_suggestion' (choose ONLY ONE: 'vertical' or 'horizontal').
+    Output format (strict):
+    {
+      "nodes": [
+        {
+          "id": "string",
+          "title": "string",
+          "kind": "input|process|storage|output|decision|tool|integration",
+          "shape": "rectangle|ellipse|diamond"
+        }
+      ],
+      "edges": [
+        {
+          "id": "string",
+          "from": "string",
+          "to": "string",
+          "label": "string"
+        }
+      ]
+    }
 
-    CRITICAL: DO NOT output any Excalidraw 'elements' or coordinates in your JSON. Focus purely on the logical semantic architecture. Our backend layout engine will dynamically construct the 2D hierarchy and shapes based on your entities and relationships!
+    CRITICAL:
+    - Every node MUST include "kind" and "shape".
+    - Output ONLY valid JSON.
+    - No markdown, no explanations, no extra keys.
   expected_output: >
-    A detailed JSON object containing the rich, finalized diagram specification that invents the necessary system architecture nodes and relationships based on the user's brief.
+    A valid JSON object containing nodes and edges with kinds and shapes for rich architecture diagrams.
   agent: diagram_builder_agent
   context:
     - preprocess_user_input_task
