@@ -605,9 +605,63 @@ def _exc_rect_exit_toward(
 	return px, py, fp
 
 
-def _exc_arrow_binding(element_id: str) -> dict[str, Any]:
-	# Avoid fixedPoint on non-elbow arrows — Excalidraw can render a broken middle gap.
-	return {"elementId": element_id, "focus": 0.5, "gap": 2}
+def _exc_shape_exit_toward(
+	shape_type: str,
+	x: float,
+	y: float,
+	w: float,
+	h: float,
+	toward_x: float,
+	toward_y: float,
+) -> tuple[float, float, tuple[float, float]]:
+	shape = (shape_type or "rectangle").lower()
+	cx = x + w / 2
+	cy = y + h / 2
+	dx = toward_x - cx
+	dy = toward_y - cy
+	if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+		dx, dy = 1.0, 0.0
+
+	hw = max(w / 2, 1e-6)
+	hh = max(h / 2, 1e-6)
+
+	if shape == "ellipse":
+		d = ((dx * dx) / (hw * hw) + (dy * dy) / (hh * hh)) ** 0.5
+		if d <= 1e-9:
+			return _exc_rect_exit_toward(x, y, w, h, toward_x, toward_y)
+		t = 1.0 / d
+		px = cx + dx * t
+		py = cy + dy * t
+		fp_x = 0.5 if w <= 0 else min(1.0, max(0.0, (px - x) / w))
+		fp_y = 0.5 if h <= 0 else min(1.0, max(0.0, (py - y) / h))
+		return px, py, (fp_x, fp_y)
+
+	if shape == "diamond":
+		d = abs(dx) / hw + abs(dy) / hh
+		if d <= 1e-9:
+			return _exc_rect_exit_toward(x, y, w, h, toward_x, toward_y)
+		t = 1.0 / d
+		px = cx + dx * t
+		py = cy + dy * t
+		fp_x = 0.5 if w <= 0 else min(1.0, max(0.0, (px - x) / w))
+		fp_y = 0.5 if h <= 0 else min(1.0, max(0.0, (py - y) / h))
+		return px, py, (fp_x, fp_y)
+
+	return _exc_rect_exit_toward(x, y, w, h, toward_x, toward_y)
+
+
+def _exc_arrow_binding(
+	element_id: str,
+	fixed_point: tuple[float, float] | None = None,
+) -> dict[str, Any]:
+	binding: dict[str, Any] = {"elementId": element_id, "focus": 0.5, "gap": 0}
+	if fixed_point is None:
+		return binding
+
+	fx = min(1.0, max(0.0, float(fixed_point[0])))
+	fy = min(1.0, max(0.0, float(fixed_point[1])))
+	binding["fixedPoint"] = [fx, fy]
+	return binding
 
 
 def _build_elements_from_entities_and_relationships(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -688,7 +742,7 @@ def _build_elements_from_entities_and_relationships(payload: dict[str, Any]) -> 
 	start_x = 120
 	start_y = 200
 
-	id_to_bounds: dict[str, tuple[float, float, float, float]] = {}
+	id_to_bounds: dict[str, dict[str, Any]] = {}
 
 	for lvl in sorted(level_nodes.keys()):
 		nodes = level_nodes[lvl]
@@ -789,7 +843,13 @@ def _build_elements_from_entities_and_relationships(payload: dict[str, Any]) -> 
 					"strokeColor": "#0f172a",
 				}
 			)
-			id_to_bounds[entity["id"]] = (x, y, node_w, node_h)
+			id_to_bounds[entity["id"]] = {
+				"x": x,
+				"y": y,
+				"w": node_w,
+				"h": node_h,
+				"shape": shape_type,
+			}
 
 	if isinstance(relationships, list) and relationships:
 		edge_specs: list[dict[str, Any]] = []
@@ -800,12 +860,36 @@ def _build_elements_from_entities_and_relationships(payload: dict[str, Any]) -> 
 			target_id = str(rel.get("target_id", ""))
 			if source_id not in id_to_bounds or target_id not in id_to_bounds:
 				continue
-			sx0, sy0, sw, sh = id_to_bounds[source_id]
-			tx0, ty0, tw, th = id_to_bounds[target_id]
+			source_bounds = id_to_bounds[source_id]
+			target_bounds = id_to_bounds[target_id]
+			sx0 = float(source_bounds["x"])
+			sy0 = float(source_bounds["y"])
+			sw = float(source_bounds["w"])
+			sh = float(source_bounds["h"])
+			tx0 = float(target_bounds["x"])
+			ty0 = float(target_bounds["y"])
+			tw = float(target_bounds["w"])
+			th = float(target_bounds["h"])
 			tcx, tcy = tx0 + tw / 2, ty0 + th / 2
 			scx, scy = sx0 + sw / 2, sy0 + sh / 2
-			sx, sy, _ = _exc_rect_exit_toward(sx0, sy0, sw, sh, tcx, tcy)
-			tx, ty, _ = _exc_rect_exit_toward(tx0, ty0, tw, th, scx, scy)
+			sx, sy, source_fp = _exc_shape_exit_toward(
+				str(source_bounds.get("shape") or "rectangle"),
+				sx0,
+				sy0,
+				sw,
+				sh,
+				tcx,
+				tcy,
+			)
+			tx, ty, target_fp = _exc_shape_exit_toward(
+				str(target_bounds.get("shape") or "rectangle"),
+				tx0,
+				ty0,
+				tw,
+				th,
+				scx,
+				scy,
+			)
 			dx = tx - sx
 			dy = ty - sy
 			edge_specs.append(
@@ -816,6 +900,8 @@ def _build_elements_from_entities_and_relationships(payload: dict[str, Any]) -> 
 					"sy": sy,
 					"dx": dx,
 					"dy": dy,
+					"source_fp": source_fp,
+					"target_fp": target_fp,
 					"rel": rel,
 				}
 			)
@@ -839,8 +925,14 @@ def _build_elements_from_entities_and_relationships(payload: dict[str, Any]) -> 
 				"strokeColor": "#0f766e",
 				"strokeWidth": 2,
 				"endArrowhead": "arrow",
-				"startBinding": _exc_arrow_binding(f"box_{source_id}"),
-				"endBinding": _exc_arrow_binding(f"box_{target_id}"),
+				"startBinding": _exc_arrow_binding(
+					f"box_{source_id}",
+					tuple(spec.get("source_fp") or (0.5, 0.5)),
+				),
+				"endBinding": _exc_arrow_binding(
+					f"box_{target_id}",
+					tuple(spec.get("target_fp") or (0.5, 0.5)),
+				),
 			}
 
 			rel_label = str(rel.get("label", "")).strip()
@@ -873,12 +965,36 @@ def _build_elements_from_entities_and_relationships(payload: dict[str, Any]) -> 
 			target_id = str(entities[i]["id"])
 			if source_id not in id_to_bounds or target_id not in id_to_bounds:
 				continue
-			sx0, sy0, sw, sh = id_to_bounds[source_id]
-			tx0, ty0, tw, th = id_to_bounds[target_id]
+			source_bounds = id_to_bounds[source_id]
+			target_bounds = id_to_bounds[target_id]
+			sx0 = float(source_bounds["x"])
+			sy0 = float(source_bounds["y"])
+			sw = float(source_bounds["w"])
+			sh = float(source_bounds["h"])
+			tx0 = float(target_bounds["x"])
+			ty0 = float(target_bounds["y"])
+			tw = float(target_bounds["w"])
+			th = float(target_bounds["h"])
 			tcx, tcy = tx0 + tw / 2, ty0 + th / 2
 			scx, scy = sx0 + sw / 2, sy0 + sh / 2
-			sx, sy, _ = _exc_rect_exit_toward(sx0, sy0, sw, sh, tcx, tcy)
-			tx, ty, _ = _exc_rect_exit_toward(tx0, ty0, tw, th, scx, scy)
+			sx, sy, source_fp = _exc_shape_exit_toward(
+				str(source_bounds.get("shape") or "rectangle"),
+				sx0,
+				sy0,
+				sw,
+				sh,
+				tcx,
+				tcy,
+			)
+			tx, ty, target_fp = _exc_shape_exit_toward(
+				str(target_bounds.get("shape") or "rectangle"),
+				tx0,
+				ty0,
+				tw,
+				th,
+				scx,
+				scy,
+			)
 			dx = tx - sx
 			dy = ty - sy
 			chain_specs.append(
@@ -889,6 +1005,8 @@ def _build_elements_from_entities_and_relationships(payload: dict[str, Any]) -> 
 					"sy": sy,
 					"dx": dx,
 					"dy": dy,
+					"source_fp": source_fp,
+					"target_fp": target_fp,
 				}
 			)
 		for i, spec in enumerate(chain_specs, start=1):
@@ -908,8 +1026,14 @@ def _build_elements_from_entities_and_relationships(payload: dict[str, Any]) -> 
 					"strokeColor": "#0f766e",
 					"strokeWidth": 2,
 					"endArrowhead": "arrow",
-					"startBinding": _exc_arrow_binding(f"box_{source_id}"),
-					"endBinding": _exc_arrow_binding(f"box_{target_id}"),
+					"startBinding": _exc_arrow_binding(
+						f"box_{source_id}",
+						tuple(spec.get("source_fp") or (0.5, 0.5)),
+					),
+					"endBinding": _exc_arrow_binding(
+						f"box_{target_id}",
+						tuple(spec.get("target_fp") or (0.5, 0.5)),
+					),
 				}
 			)
 
@@ -1286,6 +1410,125 @@ def _prune_workspace_edges(
 	return forward_only
 
 
+def _ensure_workspace_connectivity(
+	nodes: list[dict[str, Any]],
+	edges: list[dict[str, Any]],
+	layer_by_node: dict[str, int],
+) -> list[dict[str, Any]]:
+	node_ids = [str(node.get("id") or "").strip() for node in nodes]
+	node_ids = [node_id for node_id in node_ids if node_id]
+	if len(node_ids) <= 1:
+		return edges
+
+	node_order = {node_id: idx for idx, node_id in enumerate(node_ids)}
+	normalized_edges: list[dict[str, Any]] = []
+	existing_pairs: set[tuple[str, str]] = set()
+	adjacency: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+
+	for edge in edges:
+		source = str(edge.get("from") or "").strip()
+		target = str(edge.get("to") or "").strip()
+		if source not in adjacency or target not in adjacency or source == target:
+			continue
+		pair = (source, target)
+		if pair in existing_pairs:
+			continue
+
+		normalized_edges.append(
+			{
+				"id": edge.get("id") or f"edge_{len(normalized_edges) + 1}",
+				"from": source,
+				"to": target,
+				"label": _normalize_label(edge.get("label")) or "flow",
+			}
+		)
+		existing_pairs.add(pair)
+		adjacency[source].add(target)
+		adjacency[target].add(source)
+
+	visited: set[str] = set()
+	components: list[list[str]] = []
+	for node_id in node_ids:
+		if node_id in visited:
+			continue
+		stack = [node_id]
+		component: list[str] = []
+		while stack:
+			current = stack.pop()
+			if current in visited:
+				continue
+			visited.add(current)
+			component.append(current)
+			for neighbor in adjacency.get(current, set()):
+				if neighbor not in visited:
+					stack.append(neighbor)
+		components.append(component)
+
+	if len(components) <= 1:
+		for index, edge in enumerate(normalized_edges, start=1):
+			edge["id"] = f"edge_{index}"
+		return normalized_edges
+
+	def component_sort_key(component: list[str]) -> tuple[int, int]:
+		min_layer = min(layer_by_node.get(node_id, 1) for node_id in component)
+		min_index = min(node_order.get(node_id, 10**6) for node_id in component)
+		return min_layer, min_index
+
+	components.sort(key=component_sort_key)
+
+	for idx in range(1, len(components)):
+		left_component = components[idx - 1]
+		right_component = components[idx]
+
+		source = max(
+			left_component,
+			key=lambda node_id: (layer_by_node.get(node_id, 1), -node_order.get(node_id, 0)),
+		)
+		target = min(
+			right_component,
+			key=lambda node_id: (layer_by_node.get(node_id, 1), node_order.get(node_id, 0)),
+		)
+
+		source_layer = layer_by_node.get(source, 1)
+		target_layer = layer_by_node.get(target, 1)
+		if source_layer > target_layer:
+			source = min(
+				left_component,
+				key=lambda node_id: (layer_by_node.get(node_id, 1), node_order.get(node_id, 0)),
+			)
+			target = max(
+				right_component,
+				key=lambda node_id: (layer_by_node.get(node_id, 1), -node_order.get(node_id, 0)),
+			)
+			source_layer = layer_by_node.get(source, 1)
+			target_layer = layer_by_node.get(target, 1)
+
+		if source_layer > target_layer:
+			source, target = target, source
+
+		if source == target:
+			continue
+
+		pair = (source, target)
+		if pair in existing_pairs:
+			continue
+
+		normalized_edges.append(
+			{
+				"id": f"edge_{len(normalized_edges) + 1}",
+				"from": source,
+				"to": target,
+				"label": "flow",
+			}
+		)
+		existing_pairs.add(pair)
+
+	for index, edge in enumerate(normalized_edges, start=1):
+		edge["id"] = f"edge_{index}"
+
+	return normalized_edges
+
+
 def _build_fail_safe_workspace_graph(parsed: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 	seed_labels = [
 		_clean_entity_phrase(entity.get("label"))
@@ -1503,6 +1746,7 @@ def _validate_workspace_graph(
 		for node in nodes
 	}
 	edges = _prune_workspace_edges(edges, layer_by_node, max(max(1, len(nodes)) * 2, 2))
+	edges = _ensure_workspace_connectivity(nodes, edges, layer_by_node)
 
 	if _looks_like_backend_template(requirement, nodes):
 		return _build_fail_safe_workspace_graph(parsed)
