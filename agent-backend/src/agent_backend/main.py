@@ -2508,6 +2508,7 @@ def generate_workspace(payload: WorkspaceGenerateRequest) -> dict[str, Any]:
 		"elements": elements,
 		"execution_steps": steps,
 		"meta": {
+			"input_source": payload.input_source or "text",
 			"crew_used": crew_used,
 			"crew_output_used": crew_output_used,
 			"render_source": "graph-rebuild",

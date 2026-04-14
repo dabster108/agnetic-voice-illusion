@@ -1,10 +1,10 @@
 {
   "input": {
-    "text": "Create a simple online food ordering system with users, restaurants, and delivery flow. Include components like mobile app, backend server, database, and payment gateway. Show how an order moves from user selection to restaurant processing and delivery.",
-    "source": "text"
+    "text": "Can you design me a simple order authentication ordering system",
+    "source": "voice"
   },
   "elaborated": {
-    "intent_summary": "User requested: Create a simple online food ordering system with users, restaurants, and delivery flow. Include components like mobile app, backend server, database, and payment gateway. Show how an order moves from user selection to restaurant processing and delivery.",
+    "intent_summary": "User requested: Can you design me a simple order authentication ordering system",
     "handoff_target": "next_agent_for_mcp",
     "handoff_action": "Pass normalized JSON to the downstream agent that calls MCP.",
     "expected_next_payload_fields": [
@@ -22,6 +22,6 @@
   },
   "meta": {
     "entrypoint": "fastapi_workspace_generate",
-    "saved_at_utc": "2026-04-14T14:36:20.418075+00:00"
+    "saved_at_utc": "2026-04-14T14:59:21.720125+00:00"
   }
 }
