@@ -1,10 +1,10 @@
 {
   "input": {
-    "text": "Create a react authentication system",
+    "text": "Create a simple online food ordering system with users, restaurants, and delivery flow. Include components like mobile app, backend server, database, and payment gateway. Show how an order moves from user selection to restaurant processing and delivery.",
     "source": "text"
   },
   "elaborated": {
-    "intent_summary": "User requested: Create a react authentication system",
+    "intent_summary": "User requested: Create a simple online food ordering system with users, restaurants, and delivery flow. Include components like mobile app, backend server, database, and payment gateway. Show how an order moves from user selection to restaurant processing and delivery.",
     "handoff_target": "next_agent_for_mcp",
     "handoff_action": "Pass normalized JSON to the downstream agent that calls MCP.",
     "expected_next_payload_fields": [
@@ -22,6 +22,6 @@
   },
   "meta": {
     "entrypoint": "fastapi_workspace_generate",
-    "saved_at_utc": "2026-04-13T14:09:47.539193+00:00"
+    "saved_at_utc": "2026-04-14T14:36:20.418075+00:00"
   }
 }
