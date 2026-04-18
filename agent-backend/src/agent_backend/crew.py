@@ -57,10 +57,26 @@ class AgentBackend:
 			**agent_kwargs,
 		)
 
+	@agent
+	def schema_builder_agent(self) -> Agent:
+		model_name = _resolve_model_name()
+		_validate_provider_credentials(model_name)
+		return Agent(
+			config=self.agents_config["schema_builder_agent"],  # type: ignore[index]
+			llm=model_name,
+			verbose=True,
+		)
+
 	@task
 	def preprocess_user_input_task(self) -> Task:
 		return Task(
 			config=self.tasks_config["preprocess_user_input_task"],  # type: ignore[index]
+		)
+
+	@task
+	def schema_generation_task(self) -> Task:
+		return Task(
+			config=self.tasks_config["schema_generation_task"],  # type: ignore[index]
 		)
 
 	@task

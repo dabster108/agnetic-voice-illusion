@@ -70,7 +70,8 @@ preprocess_user_input_task:
 
 diagram_generation_task:
   description: >
-    Using the structured JSON output from the preprocessor task, generate a domain-agnostic diagram graph.
+    Using the structured JSON output from the preprocessor task and the schema task, generate a domain-agnostic
+    diagram graph AND attach routes + database schema payloads.
 
     Mandatory stage-by-stage process:
     1) Validate expansion from Agent 1:
@@ -119,7 +120,24 @@ diagram_generation_task:
           "to": "string",
           "label": "string"
         }
-      ]
+      ],
+      "routes": [
+        {
+          "method": "GET|POST|PUT|PATCH|DELETE",
+          "path": "/resource",
+          "summary": "string"
+        }
+      ],
+      "database_schema": {
+        "tables": [
+          {
+            "name": "string",
+            "columns": [
+              { "name": "string", "type": "string", "pk": true }
+            ]
+          }
+        ]
+      }
     }
 
     CRITICAL:
@@ -127,7 +145,47 @@ diagram_generation_task:
     - Output ONLY valid JSON.
     - No markdown, no explanations, no extra keys.
   expected_output: >
-    A valid JSON object containing nodes and edges with kinds and shapes for rich architecture diagrams.
+    A valid JSON object containing nodes, edges, routes, and database_schema.
   agent: diagram_builder_agent
+  context:
+    - preprocess_user_input_task
+    - schema_generation_task
+
+schema_generation_task:
+  description: >
+    Using the structured JSON output from the preprocessor task, generate a concise REST route list and a
+    database schema that support the core entities.
+
+    Rules:
+    - Use only the user's required components and flows as inputs.
+    - Prefer 2-4 main resources; avoid unnecessary extra tables.
+    - Routes should be REST-style; include at least GET list + POST create + GET by id per resource.
+    - Schema must include tables and columns; include "id" as primary key and "created_at" timestamp.
+    - Output ONLY JSON. No markdown.
+
+    Output format (strict):
+    {
+      "routes": [
+        {
+          "method": "GET|POST|PUT|PATCH|DELETE",
+          "path": "/resource",
+          "summary": "string"
+        }
+      ],
+      "database_schema": {
+        "tables": [
+          {
+            "name": "string",
+            "columns": [
+              { "name": "string", "type": "string", "pk": true }
+            ]
+          }
+        ]
+      }
+    }
+
+  expected_output: >
+    A valid JSON object containing routes and database_schema.
+  agent: schema_builder_agent
   context:
     - preprocess_user_input_task

@@ -250,25 +250,181 @@ _ENTITY_TRIM_WORDS = {
 	"under",
 	"via",
 	"please",
+	"based",
+	"need",
+	"needs",
+	"require",
+	"requires",
+	"should",
+	"would",
+	"could",
+	"can",
+	"make",
 	"create",
 	"build",
 	"design",
 	"generate",
 	"draw",
 	"show",
-	"make",
+	"system",
+	"service",
+	"platform",
+	"app",
+	"api",
+	"frontend",
+	"backend",
+	"database",
+	"schema",
 	"diagram",
 	"flowchart",
 	"architecture",
-	"system",
 	"workflow",
 	"process",
 	"required",
-	"need",
-	"needs",
 	"want",
 	"wants",
 }
+
+
+def _slugify(value: str) -> str:
+	cleaned = re.sub(r"[^a-zA-Z0-9\s-]", " ", value.lower())
+	parts = [part for part in re.split(r"\s+", cleaned) if part]
+	return "-".join(parts)
+
+
+def _table_name(value: str) -> str:
+	cleaned = re.sub(r"[^a-zA-Z0-9\s-]", " ", value.lower())
+	parts = [part for part in re.split(r"\s+", cleaned) if part]
+	return "_".join(parts)
+
+
+def _pluralize(value: str) -> str:
+	if value.endswith("s"):
+		return value
+	if value.endswith("y") and len(value) > 1 and value[-2] not in "aeiou":
+		return f"{value[:-1]}ies"
+	return f"{value}s"
+
+
+def _extract_resource_names(prompt: str, nodes: list[dict[str, Any]]) -> list[str]:
+	from_nodes = [str(node.get("title") or "").strip() for node in nodes]
+	from_nodes = [name for name in from_nodes if name]
+	if from_nodes:
+		return from_nodes
+
+	tokens = [token for token in re.split(r"\s+", prompt.lower()) if token]
+	filtered = [token for token in tokens if token not in _ENTITY_TRIM_WORDS]
+	return filtered
+
+
+def _build_routes_and_schema(
+	prompt: str,
+	nodes: list[dict[str, Any]],
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+	resources = []
+	for raw_name in _extract_resource_names(prompt, nodes):
+		if len(resources) >= 4:
+			break
+		base = _slugify(raw_name)
+		if not base:
+			continue
+		resources.append(base)
+
+	if not resources:
+		resources = ["items"]
+
+	routes: list[dict[str, str]] = []
+	for resource in resources:
+		collection = _pluralize(resource)
+		routes.extend(
+			[
+				{
+					"method": "GET",
+					"path": f"/{collection}",
+					"summary": f"List {collection}.",
+				},
+				{
+					"method": "POST",
+					"path": f"/{collection}",
+					"summary": f"Create a new {resource}.",
+				},
+				{
+					"method": "GET",
+					"path": f"/{collection}/{{id}}",
+					"summary": f"Get a {resource} by id.",
+				},
+			]
+		)
+
+	tables = []
+	for resource in resources:
+		name = _table_name(_pluralize(resource))
+		if not name:
+			name = "items"
+		tables.append(
+			{
+				"name": name,
+				"columns": [
+					{"name": "id", "type": "uuid", "pk": True},
+					{"name": "name", "type": "text"},
+					{"name": "created_at", "type": "timestamp"},
+				],
+			}
+		)
+
+	return routes, {"tables": tables}
+
+
+def _extract_routes_schema_from_crew_payload(
+	crew_payload: dict[str, Any],
+) -> tuple[list[dict[str, str]] | None, dict[str, Any] | None]:
+	routes_raw = crew_payload.get("routes")
+	schema_raw = crew_payload.get("database_schema")
+
+	routes: list[dict[str, str]] = []
+	if isinstance(routes_raw, list):
+		for item in routes_raw:
+			if not isinstance(item, dict):
+				continue
+			method = str(item.get("method") or "").strip().upper()
+			path = str(item.get("path") or "").strip()
+			summary = str(item.get("summary") or "").strip()
+			if not method or not path:
+				continue
+			routes.append({"method": method, "path": path, "summary": summary})
+
+	schema: dict[str, Any] | None = None
+	if isinstance(schema_raw, dict):
+		tables_raw = schema_raw.get("tables")
+		if isinstance(tables_raw, list):
+			tables: list[dict[str, Any]] = []
+			for table in tables_raw:
+				if not isinstance(table, dict):
+					continue
+				name = str(table.get("name") or "").strip()
+				columns_raw = table.get("columns")
+				if not name or not isinstance(columns_raw, list):
+					continue
+				columns: list[dict[str, Any]] = []
+				for column in columns_raw:
+					if not isinstance(column, dict):
+						continue
+					col_name = str(column.get("name") or "").strip()
+					col_type = str(column.get("type") or "").strip()
+					if not col_name or not col_type:
+						continue
+					col_payload: dict[str, Any] = {"name": col_name, "type": col_type}
+					if isinstance(column.get("pk"), bool):
+						col_payload["pk"] = column["pk"]
+					if column.get("fk"):
+						col_payload["fk"] = str(column.get("fk"))
+					columns.append(col_payload)
+				if columns:
+					tables.append({"name": name, "columns": columns})
+			if tables:
+				schema = {"tables": tables}
+
+	return routes or None, schema
 
 _GENERIC_ENTITY_WORDS = {
 	"diagram",
@@ -2460,6 +2616,7 @@ def generate_workspace(payload: WorkspaceGenerateRequest) -> dict[str, Any]:
 	nodes: list[dict[str, Any]] = []
 	edges: list[dict[str, Any]] = []
 	elements: list[dict[str, Any]] = []
+	crew_payload: dict[str, Any] = {}
 
 	try:
 		crew_result = AgentBackend().crew().kickoff(inputs=inputs)
@@ -2501,11 +2658,17 @@ def generate_workspace(payload: WorkspaceGenerateRequest) -> dict[str, Any]:
 		"mcp_synced": bool(sync_meta.get("mcp_synced")),
 	}
 	steps = _build_workspace_steps(prompt, nodes, edges, base_response, result_payload)
+	default_routes, default_schema = _build_routes_and_schema(prompt, nodes)
+	crew_routes, crew_schema = _extract_routes_schema_from_crew_payload(crew_payload)
+	routes = crew_routes or default_routes
+	database_schema = crew_schema or default_schema
 
 	return {
 		"nodes": nodes,
 		"edges": edges,
 		"elements": elements,
+		"routes": routes,
+		"database_schema": database_schema,
 		"execution_steps": steps,
 		"meta": {
 			"input_source": payload.input_source or "text",
