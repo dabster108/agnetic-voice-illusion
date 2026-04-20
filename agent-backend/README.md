@@ -33,13 +33,19 @@ crewai install
 
 ## Running the Project
 
-To kickstart your crew of AI agents and begin task execution, run this from the root folder of your project:
+To start the backend API that receives requirements from the frontend, run this from the root folder of your project:
 
 ```bash
-$ crewai run
+uv run agent_backend
 ```
 
-This command initializes the agent-backend Crew, assembling the agents and assigning them tasks as defined in your configuration.
+This starts the FastAPI server on `http://localhost:8000`, which triggers the crew when the frontend submits a prompt.
+
+If you want the older one-shot crew execution path, use:
+
+```bash
+uv run run_crew
+```
 
 This example, unmodified, will run the create a `report.md` file with the output of a research on LLMs in the root folder.
 

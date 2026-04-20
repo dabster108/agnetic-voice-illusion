@@ -71,18 +71,23 @@ class AgentBackend:
 	def preprocess_user_input_task(self) -> Task:
 		return Task(
 			config=self.tasks_config["preprocess_user_input_task"],  # type: ignore[index]
+			agent=self.input_preprocessor_agent()
 		)
 
 	@task
 	def schema_generation_task(self) -> Task:
 		return Task(
 			config=self.tasks_config["schema_generation_task"],  # type: ignore[index]
+			agent=self.schema_builder_agent(),
+			context=[self.preprocess_user_input_task()]
 		)
 
 	@task
 	def diagram_generation_task(self) -> Task:
 		return Task(
 			config=self.tasks_config["diagram_generation_task"],  # type: ignore[index]
+			agent=self.diagram_builder_agent(),
+			context=[self.preprocess_user_input_task(), self.schema_generation_task()]
 		)
 
 	@crew

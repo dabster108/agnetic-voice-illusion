@@ -665,13 +665,23 @@ def _extract_json_from_text(text: str) -> dict[str, Any]:
 		return {}
 
 	try:
-		return json.loads(raw)
+		parsed = json.loads(raw)
+		if isinstance(parsed, str):
+			return _extract_json_from_text(parsed)
+		if isinstance(parsed, dict):
+			return parsed
+		return {"raw": parsed}
 	except json.JSONDecodeError:
 		match = re.search(r"\{[\s\S]*\}", raw)
 		if not match:
 			return {"raw": raw}
 		try:
-			return json.loads(match.group(0))
+			parsed = json.loads(match.group(0))
+			if isinstance(parsed, str):
+				return _extract_json_from_text(parsed)
+			if isinstance(parsed, dict):
+				return parsed
+			return {"raw": parsed}
 		except json.JSONDecodeError:
 			return {"raw": raw}
 
@@ -2561,7 +2571,7 @@ def generate(payload: GenerateRequest) -> dict[str, Any]:
 	try:
 		result = AgentBackend().crew().kickoff(inputs=inputs)
 	except Exception as exc:
-		fallback = _build_fallback_result(requirement, str(exc))
+		import traceback; traceback.print_exc(); fallback = _build_fallback_result(requirement, str(exc))
 		sync_meta = _sync_elements_to_mcp(fallback.get("elements", []))
 		if sync_meta.get("mcp_checkpoint_id"):
 			fallback["checkpoint_id"] = sync_meta["mcp_checkpoint_id"]
@@ -2833,4 +2843,8 @@ def serve_api():
 	host = os.getenv("API_HOST", "0.0.0.0")
 	port = int(os.getenv("API_PORT", "8000"))
 	uvicorn.run("agent_backend.main:app", host=host, port=port, reload=False)
+
+
+if __name__ == "__main__":
+	serve_api()
 
