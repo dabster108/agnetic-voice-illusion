@@ -66,7 +66,6 @@ preprocess_user_input_task:
 
   expected_output: >
     A single valid JSON object matching the required schema with expanded components and flow hints.
-  agent: input_preprocessor_agent
 
 diagram_generation_task:
   description: >
@@ -146,10 +145,6 @@ diagram_generation_task:
     - No markdown, no explanations, no extra keys.
   expected_output: >
     A valid JSON object containing nodes, edges, routes, and database_schema.
-  agent: diagram_builder_agent
-  context:
-    - preprocess_user_input_task
-    - schema_generation_task
 
 schema_generation_task:
   description: >
@@ -186,6 +181,3 @@ schema_generation_task:
 
   expected_output: >
     A valid JSON object containing routes and database_schema.
-  agent: schema_builder_agent
-  context:
-    - preprocess_user_input_task

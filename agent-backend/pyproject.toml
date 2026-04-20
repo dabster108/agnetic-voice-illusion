@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agent_backend = "agent_backend.main:run"
+agent_backend = "agent_backend.main:serve_api"
 run_crew = "agent_backend.main:run"
 serve_api = "agent_backend.main:serve_api"
 train = "agent_backend.main:train"
