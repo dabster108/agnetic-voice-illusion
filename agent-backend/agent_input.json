@@ -1,10 +1,10 @@
 {
   "input": {
-    "text": "a simple express js as backend and react as frontend",
+    "text": "a fastapi authentication system with next js frontend",
     "source": "text"
   },
   "elaborated": {
-    "intent_summary": "User requested: a simple express js as backend and react as frontend",
+    "intent_summary": "User requested: a fastapi authentication system with next js frontend",
     "handoff_target": "next_agent_for_mcp",
     "handoff_action": "Pass normalized JSON to the downstream agent that calls MCP.",
     "expected_next_payload_fields": [
@@ -21,7 +21,7 @@
     ]
   },
   "meta": {
-    "entrypoint": "fastapi_generate",
-    "saved_at_utc": "2026-04-20T16:51:43.973081+00:00"
+    "entrypoint": "fastapi_workspace_generate",
+    "saved_at_utc": "2026-04-21T16:26:08.907196+00:00"
   }
 }
