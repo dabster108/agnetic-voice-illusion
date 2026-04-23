@@ -20,6 +20,7 @@ load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AGENT_INPUT_PATH = PROJECT_ROOT / "agent_input.json"
+USER_INPUT_PATH = PROJECT_ROOT / "user_input.json"
 
 
 def _configure_litellm_runtime() -> None:
@@ -2734,11 +2735,29 @@ def _build_agent_input_payload(inputs: dict[str, Any], entrypoint: str) -> dict[
 	return payload
 
 
+def _build_user_input_payload(inputs: dict[str, Any], entrypoint: str) -> dict[str, Any]:
+	raw_text = str(inputs.get("user_input", "")).strip()
+	input_source = str(inputs.get("input_source", "text")).strip() or "text"
+
+	return {
+		"user_input": raw_text,
+		"input_source": input_source,
+		"entrypoint": entrypoint,
+		"saved_at": datetime.now(timezone.utc).isoformat(),
+	}
+
+
 def _save_inputs_snapshot(inputs: dict[str, Any], entrypoint: str) -> None:
 	"""Save the latest run input payload for downstream handoff."""
 	payload = _build_agent_input_payload(inputs, entrypoint)
 	AGENT_INPUT_PATH.write_text(
 		json.dumps(payload, ensure_ascii=True, indent=2),
+		encoding="utf-8",
+	)
+
+	user_payload = _build_user_input_payload(inputs, entrypoint)
+	USER_INPUT_PATH.write_text(
+		json.dumps(user_payload, ensure_ascii=True, indent=2),
 		encoding="utf-8",
 	)
 
