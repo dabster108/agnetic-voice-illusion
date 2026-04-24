@@ -3,12 +3,14 @@ import json
 import os
 import re
 import sys
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -66,6 +68,16 @@ app.add_middleware(
 API_KEY = os.getenv("API_KEY", "").strip()
 API_KEY_HEADER = os.getenv("API_KEY_HEADER", "X-API-Key").strip() or "X-API-Key"
 
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").strip().lower() in {
+	"1",
+	"true",
+	"yes",
+	"on",
+}
+RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "60"))
+RATE_LIMIT_WINDOW_SEC = int(os.getenv("RATE_LIMIT_WINDOW_SEC", "60"))
+_rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
+
 
 def require_api_key(
 	api_key: str | None = Header(default=None, alias=API_KEY_HEADER),
@@ -74,6 +86,32 @@ def require_api_key(
 		return
 	if not api_key or api_key != API_KEY:
 		raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+def _resolve_client_ip(request: Request) -> str:
+	xff = request.headers.get("x-forwarded-for")
+	if xff:
+		return xff.split(",")[0].strip()
+	if request.client and request.client.host:
+		return request.client.host
+	return "unknown"
+
+
+def require_rate_limit(request: Request) -> None:
+	if not RATE_LIMIT_ENABLED:
+		return
+	if RATE_LIMIT_MAX <= 0 or RATE_LIMIT_WINDOW_SEC <= 0:
+		return
+
+	client_ip = _resolve_client_ip(request)
+	now = time.time()
+	window_start = now - RATE_LIMIT_WINDOW_SEC
+	bucket = _rate_limit_buckets[client_ip]
+	while bucket and bucket[0] < window_start:
+		bucket.popleft()
+	if len(bucket) >= RATE_LIMIT_MAX:
+		raise HTTPException(status_code=429, detail="Rate limit exceeded")
+	bucket.append(now)
 
 
 class GenerateRequest(BaseModel):
@@ -2574,6 +2612,7 @@ def health() -> dict[str, str]:
 def generate(
 	payload: GenerateRequest,
 	_auth: None = Depends(require_api_key),
+	_rate_limit: None = Depends(require_rate_limit),
 ) -> dict[str, Any]:
 	requirement = payload.requirement.strip()
 	if not requirement:
@@ -2629,6 +2668,7 @@ def generate(
 def generate_workspace(
 	payload: WorkspaceGenerateRequest,
 	_auth: None = Depends(require_api_key),
+	_rate_limit: None = Depends(require_rate_limit),
 ) -> dict[str, Any]:
 	prompt = payload.prompt.strip()
 	if not prompt:
