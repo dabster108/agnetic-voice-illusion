@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -61,6 +61,19 @@ app.add_middleware(
 	allow_methods=["*"],
 	allow_headers=["*"],
 )
+
+
+API_KEY = os.getenv("API_KEY", "").strip()
+API_KEY_HEADER = os.getenv("API_KEY_HEADER", "X-API-Key").strip() or "X-API-Key"
+
+
+def require_api_key(
+	api_key: str | None = Header(default=None, alias=API_KEY_HEADER),
+) -> None:
+	if not API_KEY:
+		return
+	if not api_key or api_key != API_KEY:
+		raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 class GenerateRequest(BaseModel):
@@ -2558,7 +2571,10 @@ def health() -> dict[str, str]:
 
 
 @app.post("/generate")
-def generate(payload: GenerateRequest) -> dict[str, Any]:
+def generate(
+	payload: GenerateRequest,
+	_auth: None = Depends(require_api_key),
+) -> dict[str, Any]:
 	requirement = payload.requirement.strip()
 	if not requirement:
 		raise HTTPException(status_code=400, detail="requirement is required")
@@ -2610,7 +2626,10 @@ def generate(payload: GenerateRequest) -> dict[str, Any]:
 
 
 @app.post("/workspace/generate")
-def generate_workspace(payload: WorkspaceGenerateRequest) -> dict[str, Any]:
+def generate_workspace(
+	payload: WorkspaceGenerateRequest,
+	_auth: None = Depends(require_api_key),
+) -> dict[str, Any]:
 	prompt = payload.prompt.strip()
 	if not prompt:
 		raise HTTPException(status_code=400, detail="prompt is required")
