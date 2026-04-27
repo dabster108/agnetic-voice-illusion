@@ -1,6 +1,6 @@
 {
-  "user_input": "",
+  "user_input": "create me a fastapi authentication workflow for next js as frontend",
   "input_source": "text",
-  "entrypoint": "",
-  "saved_at": ""
+  "entrypoint": "fastapi_workspace_generate",
+  "saved_at": "2026-04-27T02:28:36.119500+00:00"
 }
